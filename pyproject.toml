@@ -3,6 +3,7 @@ name = "advanced-agent"
 version = "0.1.0"
 requires-python = ">=3.13"
 dependencies = [
+    "langchain-openai>=1.6.0",
     "langgraph>=1.2.11",
 ]
 
