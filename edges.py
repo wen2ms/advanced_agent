@@ -67,14 +67,12 @@ builder.add_node("final_node", final_node)
 
 builder.set_entry_point("parse_intent")
 
-builder.add_conditional_edges(
-    "parse_intent", route_by_intent, {"summarize_node": "summarize_node", "rewrite_node": "rewrite_node"}
-)
+builder.add_conditional_edges("parse_intent", route_by_intent)
 
 builder.add_edge("summarize_node", "loop_node")
 builder.add_edge("rewrite_node", "loop_node")
 
-builder.add_conditional_edges("loop_node", loop_router, {"loop_node": "loop_node", "final_node": "final_node"})
+builder.add_conditional_edges("loop_node", loop_router)
 
 graph = builder.compile()
 

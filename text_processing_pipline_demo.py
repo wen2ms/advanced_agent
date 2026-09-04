@@ -176,7 +176,7 @@ if __name__ == "__main__":
     init_state = TextProcessState(
         raw_text="LangGraph is a stateful workflow framework in the LangChain ecosystem."
         " It supports graph-based modeling, state tracing, dynamic branching, and parallel execution,"
-        " making it suitable for orchestrating complex AI tasks."
+        " making it suitable for orchestrating complex AI tasks.",
     )
     config: RunnableConfig = {"configurable": {"thread_id": "text_processing_pipline_demo"}}
     print("\n" + "=" * 20 + "🚀 Start workflow" + "=" * 20)
@@ -195,6 +195,5 @@ if __name__ == "__main__":
 
     image_data = graph.get_graph().draw_mermaid_png()
     image_path = Path("graph_image.png")
-    with image_path.open("wb") as outfile:
-        outfile.write(image_data)
+    image_path.write_bytes(image_data)
     print(f"📊 Graph image saved: {image_path}")
