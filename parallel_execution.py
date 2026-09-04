@@ -10,7 +10,7 @@ class TextProcessState(BaseModel):
     raw_text: str
     summary_text: str | None = None
     keyword_text: str | None = None
-    has_sensitive: bool | None = None
+    has_sensitive: bool = False
     final_text: str | None = None
 
 

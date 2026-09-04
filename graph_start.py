@@ -8,13 +8,13 @@ class TaskState(BaseModel):
     user_query: str
     tool_result: str | None = None
     final_answer: str | None = None
-    progress: int | None = None
+    progress: int = 0
 
 
 class TaskStateUpdate(TypedDict):
     tool_result: NotRequired[str | None]
     final_answer: NotRequired[str | None]
-    progress: NotRequired[int | None]
+    progress: NotRequired[int]
 
 
 def parse_query(state: TaskState) -> TaskStateUpdate:

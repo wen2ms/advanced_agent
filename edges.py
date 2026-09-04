@@ -10,7 +10,7 @@ class TaskState(BaseModel):
     llm_answer: str | None = None
     tool_result: str | None = None
     final_answer: str | None = None
-    progress: int | None = None
+    progress: int = 0
 
 
 class TaskStateUpdate(TypedDict):
@@ -47,13 +47,13 @@ def route_by_intent(state: TaskState) -> str:
 
 
 def loop_node(state: TaskState) -> TaskStateUpdate:
-    progress = state.progress or 0
+    progress = state.progress
     print("\n" + "=" * 20 + f"🔄 loop_node, progress = {progress}" + "=" * 20)
     return {"progress": progress + 30}
 
 
 def loop_router(state: TaskState) -> str:
-    if state.progress and state.progress >= 100:
+    if state.progress >= 100:
         return "final_node"
     return "loop_node"
 
