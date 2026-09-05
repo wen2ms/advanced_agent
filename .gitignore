@@ -4,5 +4,7 @@
 # Cache
 __pycache__/
 
+# Graph
 graph_image.png
 interactive_optimize_graph.png
+multi_agent_graph.png
