@@ -34,7 +34,7 @@ class StateUpdate(TypedDict):
 
 def deduplicate_node(state: TextProcessState) -> TextProcessState:
     raw_text = state.raw_text
-    lines = raw_text.split("\n")
+    lines = raw_text.splitlines()
     unique_lines: list[str] = []
     seen = set()
     for line in lines:
