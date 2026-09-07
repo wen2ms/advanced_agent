@@ -13,17 +13,22 @@ chat_llm = ChatOpenAI(
 
 output_parser = StrOutputParser()
 
+MAX_RETRIES = 2
+
 
 class NovelState(BaseModel):
     novel_name: str
     plot: str | None = None
     retry_count: int = 0
     review_result: str | None = None
+    failed: bool = False
 
 
 class StateUpdate(TypedDict):
     plot: NotRequired[str]
     review_result: NotRequired[str]
+    retry_count: NotRequired[int]
+    failed: NotRequired[bool]
 
 
 plot_prompt = ChatPromptTemplate.from_messages(
@@ -52,7 +57,9 @@ review_prompt = ChatPromptTemplate.from_messages(
 Plot:
 {plot}
 
-⚠️ Note: Return only 'pass' or 'retry'. Do not output anything else. Follow the instructions strictly!""",
+⚠️ Note: 
+- Return only 'pass' or 'retry'. Do not output anything else. Follow the instructions strictly!
+- If the plot contains anything other than exactly 200 words, return 'retry'.""",
         )
     ]
 )
@@ -66,29 +73,49 @@ def plot_node(state: NovelState) -> StateUpdate:
 
 def review_node(state: NovelState) -> StateUpdate:
     review = review_agent.invoke({"plot": state.plot})
-    return {"review_result": review.strip().lower()}
+    review_stripped = review.strip().lower()
+    retry_count = state.retry_count
+    if review_stripped == "retry":
+        retry_count += 1
+    return {"review_result": review_stripped, "retry_count": retry_count}
 
 
 def decide_next_node(state: NovelState) -> Literal["end", "plot"]:
-    if state.review_result == "pass":
+    retry_count = state.retry_count
+    review_result = state.review_result or "retry"
+    if review_result == "pass":
         return "end"
-    state.retry_count += 1
+    if retry_count >= MAX_RETRIES:
+        return "end"
     return "plot"
+
+
+def exit_node(state: NovelState) -> StateUpdate:
+    return {"failed": state.review_result != "pass"}
 
 
 builder = StateGraph(NovelState)
 builder.add_node("plot", plot_node)
 builder.add_node("review", review_node)
+builder.add_node("end", exit_node)
 
 builder.add_edge(START, "plot")
 builder.add_edge("plot", "review")
 
-builder.add_conditional_edges("review", decide_next_node, {"plot": "plot", "end": END})
+builder.add_conditional_edges("review", decide_next_node)
 
 graph = builder.compile()
 
 if __name__ == "__main__":
     initial_state = NovelState(novel_name="Interstellar Wanderings")
     result = graph.invoke(initial_state)
-    print("\n" + "=" * 20 + f"Final Plot (Retried {result['retry_count']} Times)" + "=" * 20)
-    print(result["plot"])
+    if result["failed"]:
+        print(
+            "\n"
+            + "=" * 20
+            + f"Task failed: Maximum retry limit of {MAX_RETRIES} exceeded. The plot did not meet the requirements."
+            + "=" * 20
+        )
+    else:
+        print("\n" + "=" * 20 + f"Final Plot (Retried {result['retry_count']} Times)" + "=" * 20)
+        print(result["plot"])
