@@ -1,8 +1,10 @@
-from typing import Literal, NotRequired, TypedDict
+from typing import NotRequired, TypedDict
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnableConfig
 from langchain_openai import ChatOpenAI
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel
 
@@ -58,8 +60,7 @@ Plot:
 {plot}
 
 ⚠️ Note: 
-- Return only 'pass' or 'retry'. Do not output anything else. Follow the instructions strictly!
-- If the plot contains anything other than exactly 200 words, return 'retry'.""",
+- Return only 'pass' or 'retry'. Do not output anything else. Follow the instructions strictly!""",
         )
     ]
 )
@@ -77,45 +78,54 @@ def review_node(state: NovelState) -> StateUpdate:
     retry_count = state.retry_count
     if review_stripped == "retry":
         retry_count += 1
-    return {"review_result": review_stripped, "retry_count": retry_count}
+        if retry_count >= MAX_RETRIES:
+            return {"review_result": review_stripped, "retry_count": retry_count, "failed": True}
+        return {"review_result": review_stripped, "retry_count": retry_count}
+    else:
+        return {"review_result": review_stripped}
 
 
-def decide_next_node(state: NovelState) -> Literal["end", "plot"]:
-    retry_count = state.retry_count
-    review_result = state.review_result or "retry"
-    if review_result == "pass":
-        return "end"
-    if retry_count >= MAX_RETRIES:
-        return "end"
+def decide_next_node(state: NovelState) -> str:
+    if state.failed:
+        return END
+    if state.review_result == "pass":
+        return END
     return "plot"
-
-
-def exit_node(state: NovelState) -> StateUpdate:
-    return {"failed": state.review_result != "pass"}
 
 
 builder = StateGraph(NovelState)
 builder.add_node("plot", plot_node)
 builder.add_node("review", review_node)
-builder.add_node("end", exit_node)
 
 builder.add_edge(START, "plot")
 builder.add_edge("plot", "review")
 
 builder.add_conditional_edges("review", decide_next_node)
 
-graph = builder.compile()
+checkpointer = MemorySaver()
+
+graph = builder.compile(checkpointer=checkpointer)
 
 if __name__ == "__main__":
     initial_state = NovelState(novel_name="Interstellar Wanderings")
-    result = graph.invoke(initial_state)
-    if result["failed"]:
-        print(
-            "\n"
-            + "=" * 20
-            + f"Task failed: Maximum retry limit of {MAX_RETRIES} exceeded. The plot did not meet the requirements."
-            + "=" * 20
-        )
-    else:
-        print("\n" + "=" * 20 + f"Final Plot (Retried {result['retry_count']} Times)" + "=" * 20)
-        print(result["plot"])
+    thread_id = "novel_session"
+    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+
+    print("\n" + "=" * 20 + "First Run (Interrupted After Plot Execution)" + "=" * 20)
+    stream = graph.stream(initial_state, config=config)
+    for step in stream:
+        print(f"Current step: {step}")
+        if "plot" in step:
+            snapshot = graph.get_state(config)
+            plot_state = snapshot.values
+            print("🛑 Simulating program interruption (Ctrl+C scenario)")
+            print(f"Version at interruption: Version {plot_state['retry_count']}")
+            print(f"Plot content at interruption:\n{plot_state['plot']}")
+            break
+
+    print("\n" + "=" * 20 + "Second Run (Resumed from Checkpoint)" + "=" * 20)
+    result = graph.invoke(None, config={"configurable": {"thread_id": thread_id}})
+    print("\n✅ Final Result After Resuming")
+    print(f"Failed: {result['failed']}")
+    print("\n" + "=" * 20 + f"Final Plot (Retried {result['retry_count']} Times)" + "=" * 20)
+    print(result["plot"])
