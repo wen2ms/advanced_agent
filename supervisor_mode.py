@@ -215,7 +215,7 @@ workflow.add_edge("writer_agent", "supervisor")
 workflow.add_edge("code_agent", "supervisor")
 workflow.add_edge("math_agent", "supervisor")
 
-workflow_compiled = workflow.compile()
+compiled_workflow = workflow.compile()
 
 if __name__ == "__main__":
     tasks: list[str] = [
@@ -224,6 +224,6 @@ if __name__ == "__main__":
     for task in tasks:
         print("\n" + "=" * 20 + task + "=" * 20)
         init_state = TaskState(task=task)
-        result = workflow_compiled.invoke(init_state)
+        result = compiled_workflow.invoke(init_state)
         print("\n" + "=" * 20 + "✅ Result" + "=" * 20)
         print(result["result"])
