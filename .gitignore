@@ -10,3 +10,6 @@ interactive_optimize_graph.png
 multi_agent_graph.png
 parallel_graph.png
 subgraph.png
+
+# MacOS
+.DS_Store
