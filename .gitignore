@@ -8,3 +8,5 @@ __pycache__/
 graph_image.png
 interactive_optimize_graph.png
 multi_agent_graph.png
+parallel_graph.png
+subgraph.png

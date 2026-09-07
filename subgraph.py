@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import NotRequired, TypedDict
 
 from langchain_core.output_parsers import StrOutputParser
@@ -181,3 +182,8 @@ if __name__ == "__main__":
     test2_state = HomeworkMainState(homework_content="2 + 3 = 6, 4 + 6 = (blank), 7 + 8 = (blank)")
     test2_result = compiled_main_graph.invoke(test2_state)
     print("\n" + "=" * 20 + f"🎉 Final Result - Student Feedback: {test2_result['feedback']}" + "=" * 20)
+
+    image_data = compiled_main_graph.get_graph().draw_mermaid_png()
+    image_path = Path("subgraph.png")
+    image_path.write_bytes(image_data)
+    print(f"Graph image saved: {image_path}")
