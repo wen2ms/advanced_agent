@@ -1,3 +1,4 @@
+import readline
 from typing import NotRequired, TypedDict
 
 from langchain_core.output_parsers import StrOutputParser

@@ -1,5 +1,5 @@
 from collections.abc import Sequence
-from typing import Literal, TypedDict
+from typing import Literal
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate

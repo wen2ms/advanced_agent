@@ -1,5 +1,6 @@
+import readline
 from pathlib import Path
-from typing import Literal, NotRequired, TypedDict
+from typing import Literal, NotRequired, TypedDict, cast
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
@@ -11,15 +12,25 @@ from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel
 
 
+class Character(BaseModel):
+    name: str
+    description: str
+
+
+class Chapter(BaseModel):
+    chapter_name: str
+    chapter_description: str
+
+
 class NovelCreationState(BaseModel):
     user_requirement: str | None = None
     novel_title: str | None = None
-    main_characters: list[dict[str, str]] | None = None
+    main_characters: list[Character] | None = None
     plot_overview: str | None = None
     is_setting_confirmed: bool = False
     is_outline_confirmed: bool = False
     novel_outline: str | None = None
-    chapter_structure: list[dict[str, str]] | None = None
+    chapter_structure: list[Chapter] | None = None
     complete_novel: str | None = None
     current_stage: str | None = None
     chapter_generated_count: int = 0
@@ -28,22 +39,34 @@ class NovelCreationState(BaseModel):
 class StateUpdate(TypedDict):
     user_requirement: NotRequired[str]
     novel_title: NotRequired[str]
-    main_characters: NotRequired[list[dict[str, str]]]
+    main_characters: NotRequired[list[Character]]
     plot_overview: NotRequired[str]
     is_setting_confirmed: NotRequired[bool]
     is_outline_confirmed: NotRequired[bool]
     novel_outline: NotRequired[str]
-    chapter_structure: NotRequired[list[dict[str, str]]]
+    chapter_structure: NotRequired[list[Chapter]]
     complete_novel: NotRequired[str]
 
     current_stage: NotRequired[str]
     chapter_generated_count: NotRequired[int]
 
 
+class BasicSettingOutput(BaseModel):
+    novel_title: str
+    main_characters: list[Character]
+    plot_overview: str
+
+
+class OutlineOutput(BaseModel):
+    chapter_structure: list[Chapter]
+    novel_outline: str
+
+
 chat_llm = ChatOpenAI(
     base_url="https://ws-yi9oakgdflk8zstn.cn-beijing.maas.aliyuncs.com/compatible-mode/v1", model="qwen3.7-plus"
 )
-
+basic_setting_llm = chat_llm.with_structured_output(BasicSettingOutput, method="json_schema")
+outline_llm = chat_llm.with_structured_output(OutlineOutput, method="json_schema")
 output_parser = StrOutputParser()
 
 
@@ -79,60 +102,35 @@ generate_basic_setting_prompt = ChatPromptTemplate.from_messages(
             """
 Please generate the basic setting for a novel based on the user's requirements. The output must include:
 
-1. Novel title: Provide 1–2 candidate titles that are concise and appealing.
+1. Novel title: Provide 1 candidate titles that are concise and appealing.
 2. Main characters: At least 3 characters, in the format "Name: Personality description".
-3. Plot overview: 100–200 words, clearly describing the overall direction of the story.
+3. Plot overview: 100-200 words, clearly describing the overall direction of the story.
 
 User requirements: {user_requirement}
-
-Output format (strictly follow):
-Title: xxx
-Main Characters:
-
-- Name 1: Personality description 1
-- Name 2: Personality description 2
-- Name 3: Personality description 3
-
-Plot Overview: xxx
 """,
         )
     ]
 )
-generate_basic_setting_agent = generate_basic_setting_prompt | chat_llm | output_parser
+generate_basic_setting_agent = generate_basic_setting_prompt | basic_setting_llm
 
 
 def generate_basic_setting_node(state: NovelCreationState) -> StateUpdate:
     print_process_progress("Setting Generation", "(Start generating the title/characters/plot)")
-    setting = generate_basic_setting_agent.invoke({"user_requirement": state.user_requirement})
-    setting_stripped = setting.strip()
-    lines = setting_stripped.splitlines()
-    novel_title = ""
-    main_characters: list[dict[str, str]] = []
-    plot_overview = ""
-    print(setting_stripped)
-    for line in lines:
-        print(line)
-        if line.startswith("Title: "):
-            novel_title = line.removeprefix("Title: ").strip()
-        elif line.startswith("Main Characters:"):
-            continue
-        elif line.startswith("- "):
-            name, description = line.removeprefix("- ").split(": ", 1)
-            main_characters.append({"name": name.strip(), "description": description.strip()})
-        elif line.startswith("Plot Overview: "):
-            plot_overview = line.removeprefix("Plot Overview: ").strip()
+    setting = cast(
+        "BasicSettingOutput", generate_basic_setting_agent.invoke({"user_requirement": state.user_requirement})
+    )
     print("\n" + "=" * 20 + "Generated Novel Setting" + "=" * 20)
-    print(f"\nTitle: {novel_title}")
+    print(f"\nTitle: {setting.novel_title}")
     print("\nMain Characters:")
-    for character in main_characters:
-        print(f"- {character['name']}: {character['description']}")
-    print(f"Plot Overview: {plot_overview}")
+    for character in setting.main_characters:
+        print(f"- {character.name}: {character.description}")
+    print(f"Plot Overview: {setting.plot_overview}")
 
     print_process_progress("Setting Generation", "(Completed) ✅")
     return {
-        "novel_title": novel_title,
-        "main_characters": main_characters,
-        "plot_overview": plot_overview,
+        "novel_title": setting.novel_title,
+        "main_characters": setting.main_characters,
+        "plot_overview": setting.plot_overview,
         "current_stage": "Setting Generation",
     }
 
@@ -146,21 +144,11 @@ Please update the basic novel setting based on the user's original requirements 
 
 Original requirements: {user_requirement}
 Modification requests: {modify_content}
-
-Output format (strictly follow):
-Title: xxx
-Main Characters:
-
-- Name 1: Personality description 1
-- Name 2: Personality description 2
-- Name 3: Personality description 3
-
-Plot Overview: xxx
 """,
         )
     ]
 )
-confirm_basic_setting_agent = confirm_basic_setting_prompt | chat_llm | output_parser
+confirm_basic_setting_agent = confirm_basic_setting_prompt | basic_setting_llm
 
 
 def confirm_basic_setting_node(state: NovelCreationState) -> StateUpdate:
@@ -168,10 +156,6 @@ def confirm_basic_setting_node(state: NovelCreationState) -> StateUpdate:
     confirm = input(
         "Do you confirm the basic setting above? (Enter y to confirm, or enter n and provide the changes you would like to make): "
     ).lower()
-
-    novel_title = ""
-    main_characters: list[dict[str, str]] = []
-    plot_overview = ""
 
     if confirm == "y":
         print("✅ Basic setting confirmed. Proceeding to the next stage!")
@@ -182,36 +166,27 @@ def confirm_basic_setting_node(state: NovelCreationState) -> StateUpdate:
     )
     print("🔄 Updating the basic setting based on your requirements...")
 
-    setting = confirm_basic_setting_agent.invoke(
-        {"user_requirement": state.user_requirement, "modify_content": modify_content}
+    setting = cast(
+        "BasicSettingOutput",
+        confirm_basic_setting_agent.invoke(
+            {"user_requirement": state.user_requirement, "modify_content": modify_content}
+        ),
     )
-    setting_stripped = setting.strip()
-    lines = setting_stripped.splitlines()
-    for line in lines:
-        if line.startswith("Title: "):
-            novel_title = line.removeprefix("Title: ").strip()
-        elif line.startswith("Main Characters:"):
-            continue
-        elif line.startswith("- "):
-            name, description = line.removeprefix("- ").split(": ", 1)
-            main_characters.append({"name": name.strip(), "description": description.strip()})
-        elif line.startswith("Plot Overview: "):
-            plot_overview = line.removeprefix("Plot Overview: ").strip()
     print("\n" + "=" * 20 + "Modified Basic Setting" + "=" * 20)
-    print(f"Title: {novel_title}")
-    print("Main Characters:")
-    for character in main_characters:
-        print(f"- {character['name']}: {character['description']}")
-    print(f"Plot Overview: {plot_overview}")
+    print(f"\nTitle: {setting.novel_title}")
+    print("\nMain Characters:")
+    for character in setting.main_characters:
+        print(f"- {character.name}: {character.description}")
+    print(f"Plot Overview: {setting.plot_overview}")
 
     re_confirm = input("Do you confirm the modified setting? (y/n): ").lower()
     if re_confirm == "y":
         print("✅ Basic setting confirmed!")
         return {
             "is_setting_confirmed": True,
-            "novel_title": novel_title,
-            "main_characters": main_characters,
-            "plot_overview": plot_overview,
+            "novel_title": setting.novel_title,
+            "main_characters": setting.main_characters,
+            "plot_overview": setting.plot_overview,
         }
     print("❌ Not confirmed. The basic setting will be regenerated.")
     return {"is_setting_confirmed": False}
@@ -224,26 +199,18 @@ generate_outline_chapter_prompt = ChatPromptTemplate.from_messages(
             """
 Please generate the following based on the confirmed basic novel setting:
 
-1. Overall novel outline: 200–300 words, clearly describing the beginning, development, climax, and ending of the story
-2. Chapter structure: At least 8 chapters, in the format "Chapter X: Chapter plot summary (1–2 sentences)", with logical continuity between chapters
+1. Overall novel outline: 200-300 words, clearly describing the beginning, development, climax, and ending of the story
+2. Chapter structure: At least 8 chapters, in the format "Chapter X: Chapter plot summary (1-2 sentences)", with logical continuity between chapters
 
 Basic Setting:
 Title: {novel_title}
 Main Characters: {main_characters}
 Plot Overview: {plot_overview}
-
-Output format (strictly follow):
-Overall Outline: xxx
-Chapter Structure:
-
-- Chapter 1: xxx
-- Chapter 2: xxx
-  ...
 """,
         )
     ]
 )
-generate_outline_chapter_agent = generate_outline_chapter_prompt | chat_llm | output_parser
+generate_outline_chapter_agent = generate_outline_chapter_prompt | outline_llm
 
 
 def generate_outline_chapter_node(state: NovelCreationState) -> StateUpdate:
@@ -251,37 +218,26 @@ def generate_outline_chapter_node(state: NovelCreationState) -> StateUpdate:
         message = "❌ The basic setting has not been confirmed, so the outline cannot be generated!"
         raise RuntimeError(message)
     print_process_progress("Outline Generation", "(Start generating the outline/chapter structure)")
-    character_str = "\n".join(
-        [f"{character['name']}: {character['description']}" for character in state.main_characters]
+    character_str = "\n".join([f"{character.name}: {character.description}" for character in state.main_characters])
+    outline = cast(
+        "OutlineOutput",
+        generate_outline_chapter_agent.invoke(
+            {
+                "novel_title": state.novel_title,
+                "main_characters": character_str,
+                "plot_overview": state.plot_overview,
+            }
+        ),
     )
-    outline = generate_outline_chapter_agent.invoke(
-        {
-            "novel_title": state.novel_title,
-            "main_characters": character_str,
-            "plot_overview": state.plot_overview,
-        }
-    )
-    outline_stripped = outline.strip()
-    lines = outline_stripped.splitlines()
-    chapter_structure: list[dict[str, str]] = []
-    novel_outline = ""
-    for line in lines:
-        if line.startswith("Overall Outline: "):
-            novel_outline = line.removeprefix("Overall Outline: ").strip()
-        elif line.startswith("Chapter Structure:"):
-            continue
-        elif line.startswith("- Chapter"):
-            chapter_name, chapter_description = line.removeprefix("-").split(":", 1)
-            chapter_structure.append({"chapter_name": chapter_name, "chapter_description": chapter_description})
     print("\n" + "=" * 20 + "Generated Novel Outline and Chapter Structure" + "=" * 20)
-    print(f"\nOverall Outline: {novel_outline}")
+    print(f"\nOverall Outline: {outline.novel_outline}")
     print("\nChapter Structure:")
-    for chapter in chapter_structure:
-        print(f"- {chapter['chapter_name']}: {chapter['chapter_description']}")
+    for chapter in outline.chapter_structure:
+        print(f"- {chapter.chapter_name}: {chapter.chapter_description}")
     print_process_progress("Outline Generation", "(Completed) ✅")
     return {
-        "novel_outline": novel_outline,
-        "chapter_structure": chapter_structure,
+        "novel_outline": outline.novel_outline,
+        "chapter_structure": outline.chapter_structure,
         "current_stage": "Outline Generation",
     }
 
@@ -298,19 +254,11 @@ Title: {novel_title}
 Main Characters: {main_characters}
 Plot Overview: {plot_overview}
 Modification Requests: {modify_content}
-
-Output format (strictly follow):
-Overall Outline: xxx
-Chapter Structure:
-
-- Chapter 1: xxx
-- Chapter 2: xxx
-  ...
 """,
         )
     ]
 )
-confirm_outline_agent = confirm_outline_prompt | chat_llm | output_parser
+confirm_outline_agent = confirm_outline_prompt | outline_llm
 
 
 def confirm_outline_chapter_node(state: NovelCreationState) -> StateUpdate:
@@ -322,8 +270,6 @@ def confirm_outline_chapter_node(state: NovelCreationState) -> StateUpdate:
     confirm = input(
         "Do you confirm the outline and chapter structure above? (Enter y to confirm, or enter n and provide the changes you would like to make): "
     ).lower()
-    chapter_structure: list[dict[str, str]] = []
-    novel_outline = ""
     if confirm == "y":
         print("✅ The outline and chapter structure have been confirmed. Proceeding to the novel generation stage!")
         return {"is_outline_confirmed": True}
@@ -331,40 +277,30 @@ def confirm_outline_chapter_node(state: NovelCreationState) -> StateUpdate:
         "Please enter your modification requests (e.g., adjust the chapter order / modify the plot of a specific chapter / add or remove chapters): "
     )
     print("🔄 Updating the outline and chapter structure based on your requirements...")
-    character_str = "\n".join(
-        [f"{character['name']}: {character['description']}" for character in state.main_characters]
+    character_str = "\n".join([f"{character.name}: {character.description}" for character in state.main_characters])
+    outline = cast(
+        "OutlineOutput",
+        confirm_outline_agent.invoke(
+            {
+                "novel_title": state.novel_title,
+                "main_characters": character_str,
+                "plot_overview": state.plot_overview,
+                "modify_content": modify_content,
+            }
+        ),
     )
-    outline = confirm_outline_agent.invoke(
-        {
-            "novel_title": state.novel_title,
-            "main_characters": character_str,
-            "plot_overview": state.plot_overview,
-            "modify_content": modify_content,
-        }
-    )
-    outline_stripped = outline.strip()
-    lines = outline_stripped.splitlines()
-    for line in lines:
-        if line.startswith("Overall Outline: "):
-            novel_outline = line.removeprefix("Overall Outline: ").strip()
-        elif line.startswith("Chapter Structure:"):
-            continue
-        elif line.startswith("- Chapter"):
-            chapter_name, chapter_description = line.removeprefix("-").split(":", 1)
-            chapter_structure.append({"chapter_name": chapter_name, "chapter_description": chapter_description})
-
     print("\n" + "=" * 20 + "Modified Outline and Chapter Structure" + "=" * 20)
-    print(f"Overall Outline: {novel_outline}")
-    print("Chapter Structure:")
-    for chapter in chapter_structure:
-        print(f"- {chapter['chapter_name']}: {chapter['chapter_description']}")
+    print(f"\nOverall Outline: {outline.novel_outline}")
+    print("\nChapter Structure:")
+    for chapter in outline.chapter_structure:
+        print(f"- {chapter.chapter_name}: {chapter.chapter_description}")
     re_confirm = input("Do you confirm the modified outline and chapter structure? (y/n): ").lower()
     if re_confirm == "y":
         print("✅ The outline and chapter structure have been confirmed!")
         return {
             "is_outline_confirmed": True,
-            "chapter_structure": chapter_structure,
-            "novel_outline": novel_outline,
+            "chapter_structure": outline.chapter_structure,
+            "novel_outline": outline.novel_outline,
         }
     print("❌ Not confirmed. The outline will be regenerated.")
     return {"is_outline_confirmed": False}
@@ -405,9 +341,7 @@ def generate_complete_novel_node(state: NovelCreationState) -> StateUpdate:
     chapter_total = len(state.chapter_structure)
     print_chapter_progress(0, chapter_total)
 
-    character_str = "\n".join(
-        [f"{character['name']}: {character['description']}" for character in state.main_characters]
-    )
+    character_str = "\n".join([f"{character.name}: {character.description}" for character in state.main_characters])
     novel_basic_info = f"""
 Novel Title: {state.novel_title}
 Main Characters: {character_str}
@@ -415,8 +349,8 @@ Overall Outline: {state.novel_outline}
 """
     full_novel_content = f"# {state.novel_title}\n\n## Novel basic info\n{novel_basic_info}\n\n---------\n"
     for index, chapter in enumerate(state.chapter_structure, 1):
-        chapter_name = chapter["chapter_name"]
-        chapter_description = chapter["chapter_description"]
+        chapter_name = chapter.chapter_name
+        chapter_description = chapter.chapter_description
         print(f"\n🔨 [Generating] {chapter_name}...")
 
         chapter_content = generate_complete_novel_agent.invoke(
