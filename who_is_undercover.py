@@ -143,7 +143,20 @@ generate_speech_prompt = ChatPromptTemplate.from_messages(
 {history_context}
 """,
         ),
-        ("human", "Your role is {role}, and your word is {word}."),
+        (
+            "human",
+            """Your player ID: {agent}
+Your role: {role}
+Your word: {word}
+
+Currently alive players: {curr_agents}
+Eliminated players: {eliminated}
+
+In the speech history, entries labeled "{agent}" are your own speeches.
+Other player IDs refer to other players.
+Eliminated players' previous speeches remain available as historical evidence,
+but those players no longer speak or vote.""",
+        ),
     ]
 )
 generate_speech_agent = generate_speech_prompt | speech_data_llm
@@ -166,6 +179,9 @@ def generate_speech_node(state: GameState) -> StateUpdate:
                 history_context += f"- {agent}: {speech}\n"
         history_context += "\n"
 
+    curr_agents = [agent for agent in state.role_assignment if not state.eliminated or agent not in state.eliminated]
+    curr_agents_context = ", ".join(curr_agents)
+    eliminated_context = ", ".join(state.eliminated or []) or "None"
     print(f"\n🗣 Round {curr_round} speech phase (recommended length: 10-100 characters):")
     for agent, (role, word) in state.role_assignment.items():
         if state.eliminated and agent in state.eliminated:
@@ -174,7 +190,15 @@ def generate_speech_node(state: GameState) -> StateUpdate:
             speech_data = cast(
                 "SpeechData",
                 generate_speech_agent.invoke(
-                    {"role": role, "word": word, "history_context": history_context, "curr_round": curr_round}
+                    {
+                        "agent": agent,
+                        "role": role,
+                        "word": word,
+                        "history_context": history_context,
+                        "curr_agents": curr_agents_context,
+                        "eliminated": eliminated_context,
+                        "curr_round": curr_round,
+                    }
                 ),
             )
             raw_speech = speech_data.speech
@@ -224,8 +248,14 @@ vote_prompt = ChatPromptTemplate.from_messages(
         ),
         (
             "user",
-            """Your role: {role}
+            """Current round: {curr_round}
+
+Your player ID: {agent}
+Your role: {role}
 Your word: {word}
+
+Currently alive players: {curr_agents}
+Eliminated players: {eliminated}
 Choose the player you want to vote for and explain your reason. Keep the reason within 50 characters.
 """,
         ),
@@ -245,6 +275,8 @@ def vote_node(state: GameState) -> StateUpdate:
     votes: dict[str, str] = {}
     reasons: dict[str, str] = {}
     curr_agents = [agent for agent in state.role_assignment if not state.eliminated or agent not in state.eliminated]
+    curr_agents_context = ", ".join(curr_agents)
+    eliminated_context = ", ".join(state.eliminated or []) or "None"
     curr_round = state.round
 
     speech_context = f"[Round {curr_round} Speeches]\n"
@@ -259,12 +291,23 @@ def vote_node(state: GameState) -> StateUpdate:
 
     print(f"\n🗳 Round {curr_round} voting phase:")
     for agent, (role, word) in state.role_assignment.items():
-        candidates = [candidate for candidate in curr_agents if candidate != agent]
         if state.eliminated and agent in state.eliminated:
             continue
+        candidates = [candidate for candidate in curr_agents if candidate != agent]
         try:
             vote_data = cast(
-                "VoteData", vote_agent.invoke({"role": role, "word": word, "speech_context": speech_context})
+                "VoteData",
+                vote_agent.invoke(
+                    {
+                        "agent": agent,
+                        "role": role,
+                        "word": word,
+                        "speech_context": speech_context,
+                        "curr_agents": curr_agents_context,
+                        "eliminated": eliminated_context,
+                        "curr_round": curr_round,
+                    }
+                ),
             )
             vote = vote_data.vote
             reason = vote_data.vote_reason
